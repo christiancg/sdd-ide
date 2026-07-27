@@ -582,15 +582,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "code_editor"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui_dock",
- "tokio",
-]
-
-[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2262,6 +2253,15 @@ dependencies = [
  "memmap2",
  "smithay-client-toolkit",
  "tiny-skia",
+]
+
+[[package]]
+name = "sdd-ide"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui_dock",
+ "tokio",
 ]
 
 [[package]]
