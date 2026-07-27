@@ -27,8 +27,8 @@ pub struct EditorTab {
 }
 
 impl EditorTab {
-    pub fn new(file: AppFile) -> Self {
-        let read_file = file.clone().read();
+    pub async fn new(file: AppFile) -> Self {
+        let read_file = file.clone().read().await;
         if let Ok(content) = read_file {
             Self {
                 file,
@@ -43,6 +43,15 @@ impl EditorTab {
                 edited_content: String::default(),
                 message: None,
             }
+        }
+    }
+
+    pub fn default(file: AppFile) -> Self {
+        Self {
+            file,
+            original_content: String::default(),
+            edited_content: String::default(),
+            message: None,
         }
     }
 }
@@ -81,12 +90,12 @@ impl TabViewer for MyTabViewer {
 
         if ui.button("Save").clicked() {
             let selected_file = &tab.file;
-            let result = &selected_file.clone().save(&tab.edited_content);
-            if result.is_ok() {
-                tab.message = Some(Message::new(String::from("Successfully saved file"), 5));
-            } else {
-                tab.message = Some(Message::new(String::from("Failed to save file"), 5));
-            }
+            let _ = &selected_file.clone().save(&tab.edited_content);
+            // if result.is_ok() {
+            //     tab.message = Some(Message::new(String::from("Successfully saved file"), 5));
+            // } else {
+            //     tab.message = Some(Message::new(String::from("Failed to save file"), 5));
+            // }
         }
         if tab.message.is_some() {
             let message = tab.message.as_ref().unwrap();

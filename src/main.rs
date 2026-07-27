@@ -1,6 +1,6 @@
-use std::error::Error;
-use egui_dock::Node;
-use crate::services::services::FileServices;
+use std::sync::mpsc::{Receiver, Sender};
+use egui_dock::{NodeIndex, SurfaceIndex, TabIndex};
+use crate::services::services::{AppFile, FileServices};
 use crate::ui::tab::{EditorTab, MyTabViewer};
 
 mod services;
@@ -8,101 +8,137 @@ mod ui;
 
 static EMPTY_STRING: String = String::new();
 
-struct MainApp {
-    tree: egui_dock::DockState<EditorTab>,
+enum AsyncEventRequest {
+    GetFilesAndFolders,
+    GetTab(AppFile),
 }
 
-impl Default for MainApp {
-    fn default() -> Self {
-        let tree = egui_dock::DockState::new(vec![]);
-        Self { tree }
+enum AsyncEventResponse {
+    GetFilesAndFolders(Vec<AppFile>),
+    GetTab(EditorTab),
+}
+
+struct MainApp {
+    tree: egui_dock::DockState<EditorTab>,
+    files_and_folders: Vec<AppFile>,
+    tx_tokio: Sender<AsyncEventRequest>,
+    rx_eframe: Receiver<AsyncEventResponse>,
+}
+
+impl MainApp {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let (tx_to_tokio, rx_from_eframe) = std::sync::mpsc::channel::<AsyncEventRequest>();
+        let (tx_to_eframe, rx_from_tokio) = std::sync::mpsc::channel::<AsyncEventResponse>();
+
+        let egui_ctx = cc.egui_ctx.clone();
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                while let Ok(send_event) = rx_from_eframe.recv() {
+                    let tx = tx_to_eframe.clone();
+                    let ctx = egui_ctx.clone();
+
+                    tokio::spawn(async move {
+                        match send_event {
+                            AsyncEventRequest::GetFilesAndFolders => {
+                                let files = FileServices::get_files_and_folders().await;
+                                let _ = tx.send(AsyncEventResponse::GetFilesAndFolders(files));
+                            },
+                            AsyncEventRequest::GetTab(app_file) => {
+                                let edit = EditorTab::new(app_file.clone()).await;
+                                let _ = tx.send(AsyncEventResponse::GetTab(edit));
+                            },
+                        }
+                        ctx.request_repaint();
+                    });
+                }
+            });
+        });
+        let _ = tx_to_tokio.send(AsyncEventRequest::GetFilesAndFolders);
+        Self {
+            tree: egui_dock::DockState::new(vec![]),
+            files_and_folders: vec![],
+            tx_tokio: tx_to_tokio,
+            rx_eframe: rx_from_tokio,
+        }
     }
 }
 
-
-fn main() -> eframe::Result<()> {
+#[tokio::main]
+async fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions::default();
     eframe::run_native(
         "Simple Rust Code Editor",
         options,
-        Box::new(|_| Box::<MainApp>::default()),
+        Box::new(|cc| Box::new(MainApp::new(cc))),
     )
 }
 
-fn focus_tab(mut app: &mut MainApp, tab: EditorTab) {
-    let mut coordenadas_encontradas: Option<(usize, usize)> = None;
-    // Recorremos todos los nodos del árbol de forma mutable con sus índices
-    for (node_index, node) in app.tree.iter_main_surface_nodes().enumerate() {
-        // Filtramos solo los nodos que contienen pestañas (Hojas / Leaf)
-        if let egui_dock::Node::Leaf { tabs, active, .. } = node {
+fn focus_tab(tree: &mut egui_dock::DockState<EditorTab>, tab: EditorTab) {
+    let mut found_coords: Option<(usize, usize)> = None;
+    for (node_index, node) in tree.iter_main_surface_nodes().enumerate() {
+        if let egui_dock::Node::Leaf { tabs, .. } = node {
             if let Some(tab_index) = tabs.iter().position(|t| t.file.clone().file_name() == tab.file.clone().file_name()) {
-                // Guardamos los índices numéricos puros y salimos del bucle
-                coordenadas_encontradas = Some((node_index, tab_index));
+                found_coords = Some((node_index, tab_index));
                 break;
             }
         }
     }
-    if let Some((node_index, tab_index)) = coordenadas_encontradas {
-        // Opcional: También le damos el foco del sistema a esta hoja
-        // 3. Convertimos los índices numéricos a los tipos estrictos de egui_dock
-        let surface = egui_dock::SurfaceIndex::main();
-        let node_id = egui_dock::NodeIndex(node_index);
-        let tab_id = egui_dock::TabIndex(tab_index);
-        app.tree.set_active_tab((surface, node_id, tab_id));
+    if let Some((node_index, tab_index)) = found_coords {
+        let surface = SurfaceIndex::main();
+        let node_id = NodeIndex(node_index);
+        let tab_id = TabIndex(tab_index);
+        tree.set_active_tab((surface, node_id, tab_id));
+    } else {
+        tree.push_to_focused_leaf(tab);
     }
 }
 
 impl eframe::App for MainApp {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-
-        let files_and_folders = FileServices::get_files_and_folders();
-        // El SidePanel original vuelve a funcionar perfectamente
-        eframe::egui::SidePanel::left("sidebar")
+        let _ = eframe::egui::SidePanel::left("sidebar")
             .resizable(true)
-            .default_width(200.0)
-            .show(ctx, |ui| {
-                ui.heading("Files and folders");
-                for file in files_and_folders {
-                    let is_dir = file.is_dir;
-                    let filename = file.clone().file_name();
+            .default_width(200.0).show(ctx, |ui| {
+            ui.heading("Files and folders");
+            for file in &self.files_and_folders {
+                let is_dir = file.is_dir;
+                let filename = file.clone().file_name();
 
-                    if ui.button(&filename).clicked() && !is_dir {
-                        // 1. Buscamos si el archivo existe en CUALQUIER pestaña de CUALQUIER nodo
-                        let mut already_opened = false;
+                if ui.button(&filename).clicked() && !is_dir {
+                    let mut already_opened_tab: Option<EditorTab> = None;
 
-                        for node in self.tree.iter() {
-                            if let Some(tabs_vec) = node.tabs() {
-                                // Iteramos sobre todos los archivos abiertos en este recuadro
-                                if tabs_vec.iter().any(|t| t.file.clone().file_name() == filename) {
-                                    already_opened = true;
-                                    break;
-                                }
+                    for node in self.tree.iter_main_surface_nodes() {
+                        if let Some(tabs_vec) = node.tabs() {
+                            if tabs_vec.iter().any(|t| t.file.clone().file_name() == filename) {
+                                already_opened_tab = tabs_vec.iter().find(|t| t.file.clone().file_name() == filename).cloned();
+                                break;
                             }
                         }
+                    }
 
-                        if !already_opened {
-                            // 2. Si realmente NO existe, creamos la pestaña y la empujamos
-                            let tab = EditorTab::new(file.clone());
-                            self.tree.push_to_focused_leaf(tab.clone());
-
-                            // Opcional: También enfocamos de inmediato la pestaña recién creada
-                            focus_tab(self, tab);
-                        } else {
-                            // 3. Si YA existe en algún lugar, simplemente la traemos al frente
-                            let pestaña_temporal = EditorTab::new(file.clone());
-                            focus_tab(self, pestaña_temporal);
-                        }
+                    if already_opened_tab.is_some() {
+                        focus_tab(&mut self.tree, already_opened_tab.take().unwrap());
+                    } else {
+                        let _ = self.tx_tokio.send(AsyncEventRequest::GetTab(file.clone()));
                     }
                 }
-            });
-        // El CentralPanel nativo de eframe aloja de forma segura tu egui_dock
+            }
+        });
+        if let Ok(evento) = self.rx_eframe.try_recv() {
+            match evento {
+                AsyncEventResponse::GetFilesAndFolders(files_and_folders) => {
+                    self.files_and_folders = files_and_folders;
+                },
+                AsyncEventResponse::GetTab(tab) => {
+                    self.tree.push_to_focused_leaf(tab.clone());
+                    let _ = focus_tab(&mut self.tree, tab);
+                },
+            }
+            ctx.request_repaint();
+        }
         eframe::egui::CentralPanel::default().show(ctx, |ui| {
-            // 1. Instanciamos el visor de pestañas
             let mut viewer = MyTabViewer;
-
-            // 2. Renderizamos el DockArea usando el 'ui' nativo del bloque
-            // Ahora compilará perfectamente a la primera porque el tipo de 'ui'
-            // coincide al 100% con lo que espera egui_dock
             egui_dock::DockArea::new(&mut self.tree)
                 .show_inside(ui, &mut viewer);
         });
