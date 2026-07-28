@@ -1,6 +1,15 @@
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, SystemTime};
 use egui_dock::TabViewer;
-use crate::services::services::AppFile;
+use crate::services::services::{AppFile};
+
+enum AsyncEventRequest {
+    SaveFile(AppFile, String),
+}
+
+enum AsyncEventResponse {
+    SaveFile(Message),
+}
 
 #[derive(PartialEq, Clone)]
 struct Message {
@@ -18,16 +27,42 @@ impl Message {
         }
     }
 }
-#[derive(Clone, PartialEq)]
+
 pub struct EditorTab {
     pub file:  AppFile,
     original_content: String,
     edited_content: String,
     message: Option<Message>,
+    tx_tokio: Sender<AsyncEventRequest>,
+    rx_ui: Receiver<AsyncEventResponse>,
 }
 
 impl EditorTab {
     pub async fn new(file: AppFile) -> Self {
+        let (tx_to_tokio, rx_from_ui) = std::sync::mpsc::channel::<AsyncEventRequest>();
+        let (tx_to_ui, rx_from_tokio) = std::sync::mpsc::channel::<AsyncEventResponse>();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                while let Ok(send_event) = rx_from_ui.recv() {
+                    let tx = tx_to_ui.clone();
+                    tokio::spawn(async move {
+                        match send_event {
+                            AsyncEventRequest::SaveFile(app_file, edited_content) => {
+                                let result = app_file.save(&edited_content).await;
+                                let message: Option<Message>;
+                                if result.is_ok() {
+                                    message = Some(Message::new(String::from("Successfully saved file"), 5));
+                                } else {
+                                    message = Some(Message::new(String::from("Failed to save file"), 5));
+                                }
+                                let _ = tx.send(AsyncEventResponse::SaveFile(message.unwrap()));
+                            },
+                        }
+                    });
+                }
+            });
+        });
         let read_file = file.clone().read().await;
         if let Ok(content) = read_file {
             Self {
@@ -35,6 +70,8 @@ impl EditorTab {
                 original_content: content.clone(),
                 edited_content: content.clone(),
                 message: None,
+                tx_tokio: tx_to_tokio,
+                rx_ui: rx_from_tokio,
             }
         } else {
             Self {
@@ -42,16 +79,45 @@ impl EditorTab {
                 original_content: String::default(),
                 edited_content: String::default(),
                 message: None,
+                tx_tokio: tx_to_tokio,
+                rx_ui: rx_from_tokio,
             }
         }
     }
 
     pub fn default(file: AppFile) -> Self {
+        let (tx_to_tokio, rx_from_ui) = std::sync::mpsc::channel::<AsyncEventRequest>();
+        let (tx_to_ui, rx_from_tokio) = std::sync::mpsc::channel::<AsyncEventResponse>();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                while let Ok(send_event) = rx_from_ui.recv() {
+                    let tx = tx_to_ui.clone();
+
+                    tokio::spawn(async move {
+                        match send_event {
+                            AsyncEventRequest::SaveFile(app_file, edited_content) => {
+                                let result = app_file.save(&edited_content).await;
+                                let message: Option<Message>;
+                                if result.is_ok() {
+                                    message = Some(Message::new(String::from("Successfully saved file"), 5));
+                                } else {
+                                    message = Some(Message::new(String::from("Failed to save file"), 5));
+                                }
+                                let _ = tx.send(AsyncEventResponse::SaveFile(message.unwrap()));
+                            },
+                        }
+                    });
+                }
+            });
+        });
         Self {
             file,
             original_content: String::default(),
             edited_content: String::default(),
             message: None,
+            tx_tokio: tx_to_tokio,
+            rx_ui: rx_from_tokio,
         }
     }
 }
@@ -68,6 +134,13 @@ impl TabViewer for MyTabViewer {
 
     // Define the inner UI layout for each tab panel
     fn ui(&mut self, ui: &mut egui_dock::egui::Ui, tab: &mut Self::Tab) {
+        if let Ok(event) = tab.rx_ui.try_recv() {
+            match event {
+                AsyncEventResponse::SaveFile(message) => {
+                    tab.message = Some(message);
+                },
+            }
+        }
         if tab.message.is_some() {
             let unwrapped = tab.message.as_ref().unwrap();
             let elapsed = unwrapped.first_shown.elapsed();
@@ -89,13 +162,9 @@ impl TabViewer for MyTabViewer {
         });
 
         if ui.button("Save").clicked() {
-            let selected_file = &tab.file;
-            let _ = &selected_file.clone().save(&tab.edited_content);
-            // if result.is_ok() {
-            //     tab.message = Some(Message::new(String::from("Successfully saved file"), 5));
-            // } else {
-            //     tab.message = Some(Message::new(String::from("Failed to save file"), 5));
-            // }
+            let file = tab.file.clone();
+            let tx_tokio = tab.tx_tokio.clone();
+            let _ = tx_tokio.send(AsyncEventRequest::SaveFile(file, tab.edited_content.clone()));
         }
         if tab.message.is_some() {
             let message = tab.message.as_ref().unwrap();

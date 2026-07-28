@@ -22,7 +22,7 @@ struct MainApp {
     tree: egui_dock::DockState<EditorTab>,
     files_and_folders: Vec<AppFile>,
     tx_tokio: Sender<AsyncEventRequest>,
-    rx_eframe: Receiver<AsyncEventResponse>,
+    rx_ui: Receiver<AsyncEventResponse>,
 }
 
 impl MainApp {
@@ -60,7 +60,7 @@ impl MainApp {
             tree: egui_dock::DockState::new(vec![]),
             files_and_folders: vec![],
             tx_tokio: tx_to_tokio,
-            rx_eframe: rx_from_tokio,
+            rx_ui: rx_from_tokio,
         }
     }
 }
@@ -75,11 +75,11 @@ async fn main() -> eframe::Result<()> {
     )
 }
 
-fn focus_tab(tree: &mut egui_dock::DockState<EditorTab>, tab: EditorTab) {
+fn focus_tab(tree: &mut egui_dock::DockState<EditorTab>, file: &AppFile) {
     let mut found_coords: Option<(usize, usize)> = None;
     for (node_index, node) in tree.iter_main_surface_nodes().enumerate() {
         if let egui_dock::Node::Leaf { tabs, .. } = node {
-            if let Some(tab_index) = tabs.iter().position(|t| t.file.clone().file_name() == tab.file.clone().file_name()) {
+            if let Some(tab_index) = tabs.iter().position(|t| t.file.clone().file_name() == file.clone().file_name()) {
                 found_coords = Some((node_index, tab_index));
                 break;
             }
@@ -90,8 +90,6 @@ fn focus_tab(tree: &mut egui_dock::DockState<EditorTab>, tab: EditorTab) {
         let node_id = NodeIndex(node_index);
         let tab_id = TabIndex(tab_index);
         tree.set_active_tab((surface, node_id, tab_id));
-    } else {
-        tree.push_to_focused_leaf(tab);
     }
 }
 
@@ -106,33 +104,35 @@ impl eframe::App for MainApp {
                 let filename = file.clone().file_name();
 
                 if ui.button(&filename).clicked() && !is_dir {
-                    let mut already_opened_tab: Option<EditorTab> = None;
+                    let mut already_opened_tab = false;
 
                     for node in self.tree.iter_main_surface_nodes() {
                         if let Some(tabs_vec) = node.tabs() {
                             if tabs_vec.iter().any(|t| t.file.clone().file_name() == filename) {
-                                already_opened_tab = tabs_vec.iter().find(|t| t.file.clone().file_name() == filename).cloned();
+                                already_opened_tab = true;
                                 break;
                             }
                         }
                     }
 
-                    if already_opened_tab.is_some() {
-                        focus_tab(&mut self.tree, already_opened_tab.take().unwrap());
+                    if already_opened_tab {
+                        let file = file;
+                        focus_tab(&mut self.tree, file);
                     } else {
                         let _ = self.tx_tokio.send(AsyncEventRequest::GetTab(file.clone()));
                     }
                 }
             }
         });
-        if let Ok(evento) = self.rx_eframe.try_recv() {
+        if let Ok(evento) = self.rx_ui.try_recv() {
             match evento {
                 AsyncEventResponse::GetFilesAndFolders(files_and_folders) => {
                     self.files_and_folders = files_and_folders;
                 },
                 AsyncEventResponse::GetTab(tab) => {
-                    self.tree.push_to_focused_leaf(tab.clone());
-                    let _ = focus_tab(&mut self.tree, tab);
+                    let file = &tab.file.clone();
+                    self.tree.push_to_focused_leaf(tab);
+                    let _ = focus_tab(&mut self.tree, file);
                 },
             }
             ctx.request_repaint();
