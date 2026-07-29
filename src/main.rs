@@ -8,7 +8,6 @@ use crate::ui::tab::{EditorTab, MyTabViewer};
 mod services;
 mod ui;
 
-static EMPTY_STRING: String = String::new();
 
 enum AsyncEventRequest {
     GetFilesAndFolders,
@@ -20,8 +19,6 @@ enum AsyncEventRequest {
 enum AsyncEventResponse {
     GetFilesAndFolders(Vec<AppFile>),
     GetTab(EditorTab),
-    CreateNewFolder,
-    CreateNewFile,
 }
 
 struct MainApp {
@@ -199,9 +196,6 @@ impl eframe::App for MainApp {
                     let file = &tab.file.clone();
                     self.tree.push_to_focused_leaf(tab);
                     let _ = focus_tab(&mut self.tree, file);
-                },
-                AsyncEventResponse::CreateNewFolder | AsyncEventResponse::CreateNewFile => {
-                    // nothing to do, already emitted an event to reload files and folders
                 },
             }
             ctx.request_repaint();
