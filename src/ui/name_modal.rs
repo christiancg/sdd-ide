@@ -3,13 +3,14 @@ use egui::{Context, Id};
 pub struct NameModal {
     title: String,
     text: Option<String>,
+    path: String,
     name: String
 }
 
 pub enum NameModalResult {
     Open,
     Cancelled,
-    Accepted(String),
+    Accepted(String, String),
 }
 
 impl NameModal {
@@ -17,6 +18,7 @@ impl NameModal {
         Self {
             title,
             text: None,
+            path: String::from("."),
             name: String::new()
         }
     }
@@ -24,12 +26,20 @@ impl NameModal {
         Self {
             title,
             text: Some(text),
+            path: String::from("."),
             name: String::new()
         }
     }
 
-    /// Must be called every frame while the modal should stay open.
-    /// Returns whether the modal was accepted, cancelled, or is still open.
+    pub(crate) fn new_with_path(title: String, path: String) -> Self {
+        Self {
+            title,
+            text: None,
+            path,
+            name: String::new()
+        }
+    }
+
     pub fn show_modal(&mut self, ctx: &Context) -> NameModalResult {
         let modal = egui::Modal::new(Id::new("my_modal"));
         let response = modal.show(ctx, |ui| {
@@ -47,7 +57,7 @@ impl NameModal {
                     ui.close();
                 }
                 if ui.button("Accept").clicked() {
-                    result = NameModalResult::Accepted(self.name.clone());
+                    result = NameModalResult::Accepted(self.path.clone(), self.name.clone());
                     ui.close();
                 }
             });

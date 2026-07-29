@@ -12,8 +12,9 @@ mod ui;
 enum AsyncEventRequest {
     GetFilesAndFolders,
     GetTab(AppFile),
-    CreateNewFolder(String),
+    CreateNewFolder(String, String),
     CreateNewFile(String, String),
+    Delete(String, bool),
 }
 
 enum AsyncEventResponse {
@@ -62,8 +63,14 @@ impl MainApp {
                                     let _ = own_tx.send(AsyncEventRequest::GetFilesAndFolders);
                                 }
                             },
-                            AsyncEventRequest::CreateNewFolder(path) => {
-                                let result = FileServices::create_new_folder(path.clone()).await;
+                            AsyncEventRequest::CreateNewFolder(path, name) => {
+                                let result = FileServices::create_new_folder(path.clone(), name).await;
+                                if result.is_ok() {
+                                    let _ = own_tx.send(AsyncEventRequest::GetFilesAndFolders);
+                                }
+                            },
+                            AsyncEventRequest::Delete(path, is_dir) => {
+                                let result = FileServices::delete(path.clone(), is_dir).await;
                                 if result.is_ok() {
                                     let _ = own_tx.send(AsyncEventRequest::GetFilesAndFolders);
                                 }
@@ -142,7 +149,8 @@ impl eframe::App for MainApp {
                 let is_dir = file.is_dir;
                 let filename = file.clone().file_name();
 
-                if ui.button(&filename).clicked() && !is_dir {
+                let button = ui.button(&filename);
+                if button.clicked() && !is_dir {
                     let mut already_opened_tab = false;
 
                     for node in self.tree.main_surface().iter() {
@@ -161,12 +169,26 @@ impl eframe::App for MainApp {
                         let _ = self.tx_tokio.send(AsyncEventRequest::GetTab(file.clone()));
                     }
                 }
+                button.context_menu(|ui| {
+                    if ui.button("Delete").clicked() {
+                        let _ = self.tx_tokio.send(AsyncEventRequest::Delete(file.path.clone(), is_dir));
+                        ui.close();
+                    }
+                    if is_dir && ui.button("Create new file").clicked() {
+                        self.new_file_modal = Some(NameModal::new_with_path("Create new file".to_string(), file.path.clone()));
+                        ui.close();
+                    }
+                    if is_dir && ui.button("Create new folder").clicked() {
+                        self.new_folder_modal = Some(NameModal::new_with_path("Create new folder".to_string(), file.path.clone()));
+                        ui.close();
+                    }
+                });
             }
         });
         if let Some(modal) = self.new_file_modal.as_mut() {
             match modal.show_modal(&ctx) {
-                NameModalResult::Accepted(name) => {
-                    let _ = self.tx_tokio.send(AsyncEventRequest::CreateNewFile(".".to_string(), name));
+                NameModalResult::Accepted(path, name) => {
+                    let _ = self.tx_tokio.send(AsyncEventRequest::CreateNewFile(path, name));
                     self.new_file_modal = None;
                 },
                 NameModalResult::Cancelled => {
@@ -177,8 +199,8 @@ impl eframe::App for MainApp {
         }
         if let Some(modal) = self.new_folder_modal.as_mut() {
             match modal.show_modal(&ctx) {
-                NameModalResult::Accepted(name) => {
-                    let _ = self.tx_tokio.send(AsyncEventRequest::CreateNewFolder(name.clone()));
+                NameModalResult::Accepted(path, name) => {
+                    let _ = self.tx_tokio.send(AsyncEventRequest::CreateNewFolder(path, name));
                     self.new_folder_modal = None;
                 },
                 NameModalResult::Cancelled => {

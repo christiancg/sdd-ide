@@ -24,8 +24,9 @@ impl FileServices {
         files
     }
 
-    pub async fn create_new_folder(path: String) -> Result<AppFile, std::io::Error> {
-        let created = tokio::fs::create_dir_all(path.clone()).await;
+    pub async fn create_new_folder(path: String, name: String) -> Result<AppFile, std::io::Error> {
+        let full_path = format!("{}/{}", path, name);
+        let created = tokio::fs::create_dir_all(full_path).await;
         if created.is_ok() {
             Ok(AppFile::new(path.clone(), 0, true))
         } else {
@@ -40,6 +41,20 @@ impl FileServices {
             Ok(AppFile::new(complete_path.clone(), 0, false))
         } else {
             Err(created.err().unwrap())
+        }
+    }
+
+    pub async fn delete(path: String, is_dir: bool) -> Result<(), std::io::Error> {
+        let result: Result<(), std::io::Error>;
+        if is_dir {
+            result = tokio::fs::remove_dir_all(path.clone()).await;
+        } else {
+            result = tokio::fs::remove_file(path.clone()).await;
+        }
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(result.err().unwrap())
         }
     }
 }
