@@ -23,6 +23,25 @@ impl FileServices {
         }
         files
     }
+
+    pub async fn create_new_folder(path: String) -> Result<AppFile, std::io::Error> {
+        let created = tokio::fs::create_dir_all(path.clone()).await;
+        if created.is_ok() {
+            Ok(AppFile::new(path.clone(), 0, true))
+        } else {
+            Err(created.err().unwrap())
+        }
+    }
+
+    pub async fn create_new_file(path: String, file_name: String) -> Result<AppFile, std::io::Error> {
+        let complete_path = path.clone() + "/" + &*file_name;
+        let created = tokio::fs::File::create(complete_path.clone()).await;
+        if created.is_ok() {
+            Ok(AppFile::new(complete_path.clone(), 0, false))
+        } else {
+            Err(created.err().unwrap())
+        }
+    }
 }
 
 impl AppFile {

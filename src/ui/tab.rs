@@ -30,7 +30,6 @@ impl Message {
 
 pub struct EditorTab {
     pub file:  AppFile,
-    original_content: String,
     edited_content: String,
     message: Option<Message>,
     tx_tokio: Sender<AsyncEventRequest>,
@@ -67,7 +66,6 @@ impl EditorTab {
         if let Ok(content) = read_file {
             Self {
                 file,
-                original_content: content.clone(),
                 edited_content: content.clone(),
                 message: None,
                 tx_tokio: tx_to_tokio,
@@ -76,48 +74,11 @@ impl EditorTab {
         } else {
             Self {
                 file,
-                original_content: String::default(),
                 edited_content: String::default(),
                 message: None,
                 tx_tokio: tx_to_tokio,
                 rx_ui: rx_from_tokio,
             }
-        }
-    }
-
-    pub fn default(file: AppFile) -> Self {
-        let (tx_to_tokio, rx_from_ui) = std::sync::mpsc::channel::<AsyncEventRequest>();
-        let (tx_to_ui, rx_from_tokio) = std::sync::mpsc::channel::<AsyncEventResponse>();
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                while let Ok(send_event) = rx_from_ui.recv() {
-                    let tx = tx_to_ui.clone();
-
-                    tokio::spawn(async move {
-                        match send_event {
-                            AsyncEventRequest::SaveFile(app_file, edited_content) => {
-                                let result = app_file.save(&edited_content).await;
-                                let message: Option<Message>;
-                                if result.is_ok() {
-                                    message = Some(Message::new(String::from("Successfully saved file"), 5));
-                                } else {
-                                    message = Some(Message::new(String::from("Failed to save file"), 5));
-                                }
-                                let _ = tx.send(AsyncEventResponse::SaveFile(message.unwrap()));
-                            },
-                        }
-                    });
-                }
-            });
-        });
-        Self {
-            file,
-            original_content: String::default(),
-            edited_content: String::default(),
-            message: None,
-            tx_tokio: tx_to_tokio,
-            rx_ui: rx_from_tokio,
         }
     }
 }
