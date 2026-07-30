@@ -1,6 +1,9 @@
 use std::sync::mpsc::{Receiver, Sender};
 use eframe::egui::include_image;
+use eframe::wgpu::naga::compact::KeepUnused::No;
+use egui::{Label, Sense, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex, TabIndex, TabPath};
+use egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewBuilder};
 use crate::services::services::{AppFile, FileServices};
 use crate::ui::name_modal::{NameModal, NameModalResult};
 use crate::ui::tab::{EditorTab, MyTabViewer};
@@ -50,7 +53,7 @@ impl MainApp {
                     tokio::spawn(async move {
                         match send_event {
                             AsyncEventRequest::GetFilesAndFolders => {
-                                let files = FileServices::get_files_and_folders().await;
+                                let files = FileServices::get_files_and_folders(".".to_string()).await;
                                 let _ = tx.send(AsyncEventResponse::GetFilesAndFolders(files));
                             },
                             AsyncEventRequest::GetTab(app_file) => {
@@ -124,67 +127,129 @@ fn focus_tab(tree: &mut egui_dock::DockState<EditorTab>, file: &AppFile) {
     }
 }
 
-impl eframe::App for MainApp {
-    fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        let _ = eframe::egui::Panel::left("sidebar")
-            .resizable(true)
-            .default_size(200.0).show(ui, |ui| {
-            ui.heading("Files and folders");
-            ui.horizontal(|ui| {
-                let image_refresh = include_image!("../assets/icons/refresh.svg");
-                if ui.button(image_refresh).clicked() {
-                    let _ = self.tx_tokio.send(AsyncEventRequest::GetFilesAndFolders);
+fn file_tree(app: &mut MainApp, files: Vec<AppFile>, builder: &mut TreeViewBuilder<String>) {
+    for file in &files {
+        let is_dir = file.is_dir;
+        let filename = file.clone().file_name();
+        let mut node: NodeBuilder<String>;
+        if is_dir {
+            node = NodeBuilder::dir(file.path.clone());
+        } else {
+            node = NodeBuilder::leaf(file.path.clone());
+        }
+        node = node.label(filename.clone()).context_menu(get_context_menu(is_dir, app, file.clone()));
+        if is_dir {
+            let is_open = builder.node(node);
+            if is_open {
+                if let Some(ref children) = file.children {
+                    file_tree(app, children.clone(), builder);
                 }
-                let image_new_file = include_image!("../assets/icons/new-file.svg");
-                if ui.button(image_new_file).clicked() {
-                    self.new_file_modal = Some(NameModal::new("Create new file".to_string()));
-                }
-                let image_new_folder = include_image!("../assets/icons/new-folder.svg");
-                if ui.button(image_new_folder).clicked() {
-                    self.new_folder_modal = Some(NameModal::new("Create new folder".to_string()));
-                }
-            });
-            for file in &self.files_and_folders {
-                let is_dir = file.is_dir;
-                let filename = file.clone().file_name();
+            }
+            builder.close_dir();
+        } else {
+            builder.node(node);
+        }
+    }
+}
 
-                let button = ui.button(&filename);
-                if button.clicked() && !is_dir {
-                    let mut already_opened_tab = false;
+fn get_context_menu<'a>(is_dir: bool, app: &'a mut MainApp, file: AppFile) -> impl FnMut(&mut egui::Ui) + 'a {
+    move |ui| {
+        if ui.button("Delete").clicked() {
+            let _ = app.tx_tokio.send(AsyncEventRequest::Delete(file.path.clone(), is_dir));
+            ui.close();
+        }
+        if is_dir && ui.button("Create new file").clicked() {
+            app.new_file_modal = Some(NameModal::new_with_path("Create new file".to_string(), file.path.clone()));
+            ui.close();
+        }
+        if is_dir && ui.button("Create new folder").clicked() {
+            app.new_folder_modal = Some(NameModal::new_with_path("Create new folder".to_string(), file.path.clone()));
+            ui.close();
+        }
+    }
+}
 
-                    for node in self.tree.main_surface().iter() {
-                        if let Some(tabs_vec) = node.tabs() {
-                            if tabs_vec.iter().any(|t| t.file.clone().file_name() == filename) {
-                                already_opened_tab = true;
-                                break;
+fn search_app_file(files_and_folders: Vec<AppFile>, name: String) -> Option<AppFile> {
+    for file in files_and_folders.clone() {
+        if file.clone().path == name {
+            return Some(file);
+        } else if file.is_dir {
+            if let Some(children) = file.children {
+                let result = search_app_file(children, name.clone());
+                if result.is_some() {
+                    return result;
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn show_treeview(app: &mut MainApp, ui: &mut egui::Ui, files: Vec<AppFile>) {
+    let id = ui.make_persistent_id("files and folders tree view");
+    let (_, actions) = TreeView::new(id).show(ui, |builder| {
+        file_tree(app, files.clone(), builder);
+    });
+    for action in actions.iter() {
+        match action {
+            Action::Move(_) => {}
+            Action::SetSelected(_) => {}
+            Action::Drag(_dnd) => {}
+            Action::Activate(activate) => {
+                for node_id in activate.selected.clone() {
+                    let found_file: Option<AppFile> = search_app_file(app.files_and_folders.clone(), node_id.clone());
+                    if let Some(foundFile) = found_file {
+                        if !foundFile.is_dir {
+                            let mut already_opened_tab = false;
+                            for node in app.tree.main_surface().iter() {
+                                if let Some(tabs_vec) = node.tabs() {
+                                    if tabs_vec.iter().any(|t| t.file.clone().file_name() == node_id) {
+                                        already_opened_tab = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if already_opened_tab {
+                                let file = foundFile;
+                                focus_tab(&mut app.tree, &file);
+                            } else {
+                                let _ = app.tx_tokio.send(AsyncEventRequest::GetTab(foundFile.clone()));
                             }
                         }
                     }
-
-                    if already_opened_tab {
-                        let file = file;
-                        focus_tab(&mut self.tree, file);
-                    } else {
-                        let _ = self.tx_tokio.send(AsyncEventRequest::GetTab(file.clone()));
-                    }
                 }
-                button.context_menu(|ui| {
-                    if ui.button("Delete").clicked() {
-                        let _ = self.tx_tokio.send(AsyncEventRequest::Delete(file.path.clone(), is_dir));
-                        ui.close();
-                    }
-                    if is_dir && ui.button("Create new file").clicked() {
-                        self.new_file_modal = Some(NameModal::new_with_path("Create new file".to_string(), file.path.clone()));
-                        ui.close();
-                    }
-                    if is_dir && ui.button("Create new folder").clicked() {
-                        self.new_folder_modal = Some(NameModal::new_with_path("Create new folder".to_string(), file.path.clone()));
-                        ui.close();
-                    }
-                });
             }
-        });
+            Action::DragExternal(..) => {}
+            Action::MoveExternal(..) => {}
+        }
+    }
+}
+
+impl eframe::App for MainApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        let _ = egui::Panel::left("sidebar")
+            .resizable(true)
+            .default_size(200.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.heading("Files and folders");
+                    ui.horizontal(|ui| {
+                        let image_refresh = include_image!("../assets/icons/refresh.svg");
+                        if ui.button(image_refresh).clicked() {
+                            let _ = self.tx_tokio.send(AsyncEventRequest::GetFilesAndFolders);
+                        }
+                        let image_new_file = include_image!("../assets/icons/new-file.svg");
+                        if ui.button(image_new_file).clicked() {
+                            self.new_file_modal = Some(NameModal::new("Create new file".to_string()));
+                        }
+                        let image_new_folder = include_image!("../assets/icons/new-folder.svg");
+                        if ui.button(image_new_folder).clicked() {
+                            self.new_folder_modal = Some(NameModal::new("Create new folder".to_string()));
+                        }
+                    });
+                    show_treeview(self, ui, self.files_and_folders.clone());
+                });
+            });
         if let Some(modal) = self.new_file_modal.as_mut() {
             match modal.show_modal(&ctx) {
                 NameModalResult::Accepted(path, name) => {

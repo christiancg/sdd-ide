@@ -943,6 +943,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_ltreeview"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac61e806d7926406d92cc34b755b8589cad658c0662d7a457499eeb2cfa3d8aa"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "either"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2920,6 +2929,7 @@ dependencies = [
  "egui",
  "egui_dock",
  "egui_extras",
+ "egui_ltreeview",
  "tokio",
 ]
 

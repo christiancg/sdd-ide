@@ -9,4 +9,5 @@ egui_dock = "0.20.1"
 egui_extras = { version = "0.35.0", features = ["svg"] }
 tokio = { version = "1.53.1", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"] }
 egui = "0.35.0"
+egui_ltreeview = "0.8.0"
 

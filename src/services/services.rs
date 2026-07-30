@@ -1,27 +1,32 @@
+use std::pin::Pin;
 use tokio::io::AsyncWriteExt;
 
 #[derive(Clone, PartialEq)]
 pub struct AppFile {
     pub path: String,
     pub size: u64,
-    pub is_dir: bool
+    pub is_dir: bool,
+    pub children: Option<Vec<AppFile>>,
 }
 
 pub struct FileServices;
 
 impl FileServices {
-    pub async fn get_files_and_folders() -> Vec<AppFile> {
-        let mut files: Vec<AppFile> = Vec::new();
-        if let Ok(mut entries) = tokio::fs::read_dir(".").await {
-            while let Some(entry) = entries.next_entry().await.unwrap() {
-                if entry.file_type().await.unwrap().is_dir() {
-                    files.push(AppFile::new(entry.path().to_str().unwrap().to_string(), entry.metadata().await.unwrap().len(), true));
-                } else {
-                    files.push(AppFile::new(entry.path().to_str().unwrap().to_string(), entry.metadata().await.unwrap().len(), false));
+    pub fn get_files_and_folders(path: String) -> Pin<Box<dyn Future<Output = Vec<AppFile>> + Send>> {
+        Box::pin(async move {
+            let mut files: Vec<AppFile> = Vec::new();
+            if let Ok(mut entries) = tokio::fs::read_dir(path).await {
+                while let Some(entry) = entries.next_entry().await.unwrap() {
+                    if entry.file_type().await.unwrap().is_dir() {
+                        let children = Self::get_files_and_folders(entry.path().to_str().unwrap().to_string()).await;
+                        files.push(AppFile::new_with_children(entry.path().to_str().unwrap().to_string(), entry.metadata().await.unwrap().len(), children));
+                    } else {
+                        files.push(AppFile::new(entry.path().to_str().unwrap().to_string(), entry.metadata().await.unwrap().len(), false));
+                    }
                 }
             }
-        }
-        files
+            files
+        })
     }
 
     pub async fn create_new_folder(path: String, name: String) -> Result<AppFile, std::io::Error> {
@@ -64,7 +69,17 @@ impl AppFile {
         Self {
             path,
             size,
-            is_dir
+            is_dir,
+            children: None,
+        }
+    }
+
+    pub fn new_with_children(path: String, size: u64, children: Vec<AppFile>) -> Self {
+        Self {
+            path,
+            size,
+            is_dir: true,
+            children: Some(children),
         }
     }
 

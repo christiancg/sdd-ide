@@ -113,8 +113,8 @@ impl TabViewer for MyTabViewer {
         let selected = &tab.file;
         ui.heading(format!("Editing: {}", &selected.path));
         ui.separator();
-        egui_dock::egui::ScrollArea::vertical().show(ui, |ui| {
-            let editor = egui_dock::egui::TextEdit::multiline(&mut tab.edited_content)
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let editor = egui::TextEdit::multiline(&mut tab.edited_content)
                 .font(egui_dock::egui::TextStyle::Monospace) // Code font
                 .code_editor()                    // Enables tab key support
                 .desired_width(f32::INFINITY)     // Take up all horizontal space
