@@ -6,10 +6,23 @@ pub struct AppFile {
     pub path: String,
     pub size: u64,
     pub is_dir: bool,
+    pub is_hidden: bool,
     pub children: Option<Vec<AppFile>>,
 }
 
 pub struct FileServices;
+
+#[cfg(windows)]
+fn is_hidden_entry(_file_name: &str, metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
+}
+
+#[cfg(not(windows))]
+fn is_hidden_entry(file_name: &str, _metadata: &std::fs::Metadata) -> bool {
+    file_name.starts_with('.')
+}
 
 impl FileServices {
     pub fn get_files_and_folders(path: String) -> Pin<Box<dyn Future<Output = Vec<AppFile>> + Send>> {
@@ -17,11 +30,14 @@ impl FileServices {
             let mut files: Vec<AppFile> = Vec::new();
             if let Ok(mut entries) = tokio::fs::read_dir(path).await {
                 while let Some(entry) = entries.next_entry().await.unwrap() {
+                    let metadata = entry.metadata().await.unwrap();
+                    let file_name = entry.file_name().to_string_lossy().to_string();
+                    let is_hidden = is_hidden_entry(&file_name, &metadata);
                     if entry.file_type().await.unwrap().is_dir() {
                         let children = Self::get_files_and_folders(entry.path().to_str().unwrap().to_string()).await;
-                        files.push(AppFile::new_with_children(entry.path().to_str().unwrap().to_string(), entry.metadata().await.unwrap().len(), children));
+                        files.push(AppFile::new_with_children(entry.path().to_str().unwrap().to_string(), metadata.len(), children, is_hidden));
                     } else {
-                        files.push(AppFile::new(entry.path().to_str().unwrap().to_string(), entry.metadata().await.unwrap().len(), false));
+                        files.push(AppFile::new(entry.path().to_str().unwrap().to_string(), metadata.len(), false, is_hidden));
                     }
                 }
             }
@@ -33,7 +49,7 @@ impl FileServices {
         let full_path = format!("{}/{}", path, name);
         let created = tokio::fs::create_dir_all(full_path).await;
         if created.is_ok() {
-            Ok(AppFile::new(path.clone(), 0, true))
+            Ok(AppFile::new(path.clone(), 0, true, false))
         } else {
             Err(created.err().unwrap())
         }
@@ -43,7 +59,7 @@ impl FileServices {
         let complete_path = path.clone() + "/" + &*file_name;
         let created = tokio::fs::File::create(complete_path.clone()).await;
         if created.is_ok() {
-            Ok(AppFile::new(complete_path.clone(), 0, false))
+            Ok(AppFile::new(complete_path.clone(), 0, false, false))
         } else {
             Err(created.err().unwrap())
         }
@@ -65,20 +81,22 @@ impl FileServices {
 }
 
 impl AppFile {
-    pub fn new(path: String, size: u64, is_dir: bool) -> Self {
+    pub fn new(path: String, size: u64, is_dir: bool, is_hidden: bool) -> Self {
         Self {
             path,
             size,
             is_dir,
+            is_hidden,
             children: None,
         }
     }
 
-    pub fn new_with_children(path: String, size: u64, children: Vec<AppFile>) -> Self {
+    pub fn new_with_children(path: String, size: u64, children: Vec<AppFile>, is_hidden: bool) -> Self {
         Self {
             path,
             size,
             is_dir: true,
+            is_hidden,
             children: Some(children),
         }
     }

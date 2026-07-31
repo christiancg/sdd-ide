@@ -32,6 +32,7 @@ struct MainApp {
     rx_ui: Receiver<AsyncEventResponse>,
     new_file_modal: Option<NameModal>,
     new_folder_modal: Option<NameModal>,
+    show_hidden_files: bool,
 }
 
 impl MainApp {
@@ -92,6 +93,7 @@ impl MainApp {
             rx_ui: rx_from_tokio,
             new_file_modal: None,
             new_folder_modal: None,
+            show_hidden_files: false,
         }
     }
 }
@@ -131,6 +133,9 @@ fn file_tree(app: &mut MainApp, files: Vec<AppFile>, builder: &mut TreeViewBuild
     for file in &files {
         let is_dir = file.is_dir;
         let filename = file.clone().file_name();
+        if !app.show_hidden_files && file.is_hidden {
+            continue;
+        }
         let mut node: NodeBuilder<String>;
         if is_dir {
             node = NodeBuilder::dir(file.path.clone());
@@ -246,6 +251,7 @@ impl eframe::App for MainApp {
                         if ui.button(image_new_folder).clicked() {
                             self.new_folder_modal = Some(NameModal::new("Create new folder".to_string()));
                         }
+                        ui.toggle_value(&mut self.show_hidden_files, "Show hidden");
                     });
                     show_treeview(self, ui, self.files_and_folders.clone());
                 });
