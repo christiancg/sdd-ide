@@ -206,7 +206,7 @@ fn show_treeview(app: &mut MainApp, ui: &mut egui::Ui, files: Vec<AppFile>) {
                             let mut already_opened_tab = false;
                             for node in app.tree.main_surface().iter() {
                                 if let Some(tabs_vec) = node.tabs() {
-                                    if tabs_vec.iter().any(|t| t.file.clone().file_name() == node_id) {
+                                    if tabs_vec.iter().any(|t| t.file.path == node_id) {
                                         already_opened_tab = true;
                                         break;
                                     }
