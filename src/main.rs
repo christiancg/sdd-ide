@@ -16,6 +16,7 @@ enum AsyncEventRequest {
     CreateNewFolder(String, String),
     CreateNewFile(String, String),
     Delete(String, bool),
+    Move(Vec<String>, String),
 }
 
 enum AsyncEventResponse {
@@ -73,6 +74,12 @@ impl MainApp {
                             },
                             AsyncEventRequest::Delete(path, is_dir) => {
                                 let result = FileServices::delete(path.clone(), is_dir).await;
+                                if result.is_ok() {
+                                    let _ = own_tx.send(AsyncEventRequest::GetFilesAndFolders);
+                                }
+                            },
+                            AsyncEventRequest::Move(paths, destination) => {
+                                let result = FileServices::move_files(paths, destination).await;
                                 if result.is_ok() {
                                     let _ = own_tx.send(AsyncEventRequest::GetFilesAndFolders);
                                 }
@@ -195,7 +202,9 @@ fn show_treeview(app: &mut MainApp, ui: &mut egui::Ui, files: Vec<AppFile>) {
     });
     for action in actions.iter() {
         match action {
-            Action::Move(_) => {}
+            Action::Move(move_dir) => {
+                let _ = app.tx_tokio.send(AsyncEventRequest::Move(move_dir.source.clone(), move_dir.target.clone()));
+            }
             Action::SetSelected(_) => {}
             Action::Drag(_dnd) => {}
             Action::Activate(activate) => {

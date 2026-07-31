@@ -78,6 +78,17 @@ impl FileServices {
             Err(result.err().unwrap())
         }
     }
+
+    pub async fn move_files(sources: Vec<String>, destination: String) -> Result<(), std::io::Error> {
+        for source in sources {
+            let last = source.split("/").last();
+            if let Some(name) = last {
+                let final_path = destination.clone() + "/" + name;
+                tokio::fs::rename(source, final_path).await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl AppFile {
