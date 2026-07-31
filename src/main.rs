@@ -1,7 +1,7 @@
 use std::sync::mpsc::{Receiver, Sender};
 use eframe::egui::include_image;
 use egui_dock::{NodeIndex, SurfaceIndex, TabIndex, TabPath};
-use egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewBuilder};
+use egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewBuilder, TreeViewState};
 use crate::services::services::{AppFile, FileServices};
 use crate::ui::name_modal::{NameModal, NameModalResult};
 use crate::ui::tab::{EditorTab, MyTabViewer};
@@ -32,6 +32,7 @@ struct MainApp {
     new_file_modal: Option<NameModal>,
     new_folder_modal: Option<NameModal>,
     show_hidden_files: bool,
+    collapse_all_requested: bool,
 }
 
 impl MainApp {
@@ -99,6 +100,7 @@ impl MainApp {
             new_file_modal: None,
             new_folder_modal: None,
             show_hidden_files: false,
+            collapse_all_requested: false,
         }
     }
 }
@@ -195,11 +197,32 @@ fn search_app_file(files_and_folders: Vec<AppFile>, name: String) -> Option<AppF
     None
 }
 
+fn collect_dir_paths(files: &[AppFile], paths: &mut Vec<String>) {
+    for file in files {
+        if file.is_dir {
+            paths.push(file.path.clone());
+            if let Some(ref children) = file.children {
+                collect_dir_paths(children, paths);
+            }
+        }
+    }
+}
+
 fn show_treeview(app: &mut MainApp, ui: &mut egui::Ui, files: Vec<AppFile>) {
     let id = ui.make_persistent_id("files and folders tree view");
-    let (_, actions) = TreeView::new(id).show(ui, |builder| {
+    let mut state = TreeViewState::load(ui, id).unwrap_or_default();
+    if app.collapse_all_requested {
+        let mut dir_paths = Vec::new();
+        collect_dir_paths(&files, &mut dir_paths);
+        for path in dir_paths {
+            state.set_openness(path, false);
+        }
+        app.collapse_all_requested = false;
+    }
+    let (_, actions) = TreeView::new(id).show_state(ui, &mut state, |builder| {
         file_tree(app, files.clone(), builder);
     });
+    state.store(ui, id);
     for action in actions.iter() {
         match action {
             Action::Move(move_dir) => {
@@ -242,7 +265,7 @@ impl eframe::App for MainApp {
         let ctx = ui.ctx().clone();
         let _ = egui::Panel::left("sidebar")
             .resizable(true)
-            .default_size(200.0).show(ui, |ui| {
+            .default_size(230.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.heading("Files and folders");
                     ui.horizontal(|ui| {
@@ -259,6 +282,10 @@ impl eframe::App for MainApp {
                             self.new_folder_modal = Some(NameModal::new("Create new folder".to_string()));
                         }
                         ui.toggle_value(&mut self.show_hidden_files, "Show hidden");
+                        let image_collapse = include_image!("../assets/icons/collapse.svg");
+                        if ui.button(image_collapse).clicked() {
+                            self.collapse_all_requested = true;
+                        }
                     });
                     show_treeview(self, ui, self.files_and_folders.clone());
                 });
