@@ -1,7 +1,5 @@
 use std::sync::mpsc::{Receiver, Sender};
 use eframe::egui::include_image;
-use eframe::wgpu::naga::compact::KeepUnused::No;
-use egui::{Label, Sense, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex, TabIndex, TabPath};
 use egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewBuilder};
 use crate::services::services::{AppFile, FileServices};
@@ -138,7 +136,7 @@ fn file_tree(app: &mut MainApp, files: Vec<AppFile>, builder: &mut TreeViewBuild
         }
         let mut node: NodeBuilder<String>;
         if is_dir {
-            node = NodeBuilder::dir(file.path.clone());
+            node = NodeBuilder::dir(file.path.clone()).default_open(false);
         } else {
             node = NodeBuilder::leaf(file.path.clone());
         }
@@ -190,7 +188,7 @@ fn search_app_file(files_and_folders: Vec<AppFile>, name: String) -> Option<AppF
     None
 }
 
-pub fn show_treeview(app: &mut MainApp, ui: &mut egui::Ui, files: Vec<AppFile>) {
+fn show_treeview(app: &mut MainApp, ui: &mut egui::Ui, files: Vec<AppFile>) {
     let id = ui.make_persistent_id("files and folders tree view");
     let (_, actions) = TreeView::new(id).show(ui, |builder| {
         file_tree(app, files.clone(), builder);
