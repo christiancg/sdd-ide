@@ -233,8 +233,8 @@ fn show_treeview(app: &mut MainApp, ui: &mut egui::Ui, files: Vec<AppFile>) {
             Action::Activate(activate) => {
                 for node_id in activate.selected.clone() {
                     let found_file: Option<AppFile> = search_app_file(app.files_and_folders.clone(), node_id.clone());
-                    if let Some(foundFile) = found_file {
-                        if !foundFile.is_dir {
+                    if let Some(found_file) = found_file {
+                        if !found_file.is_dir {
                             let mut already_opened_tab = false;
                             for node in app.tree.main_surface().iter() {
                                 if let Some(tabs_vec) = node.tabs() {
@@ -245,10 +245,10 @@ fn show_treeview(app: &mut MainApp, ui: &mut egui::Ui, files: Vec<AppFile>) {
                                 }
                             }
                             if already_opened_tab {
-                                let file = foundFile;
+                                let file = found_file;
                                 focus_tab(&mut app.tree, &file);
                             } else {
-                                let _ = app.tx_tokio.send(AsyncEventRequest::GetTab(foundFile.clone()));
+                                let _ = app.tx_tokio.send(AsyncEventRequest::GetTab(found_file.clone()));
                             }
                         }
                     }
